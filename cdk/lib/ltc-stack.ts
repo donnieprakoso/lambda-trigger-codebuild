@@ -14,6 +14,7 @@ export class LtcStack extends cdk.Stack {
       
       environment: {
         codebuild_projectName:'',
+        github_sha1_secret:''
       },
       
     });

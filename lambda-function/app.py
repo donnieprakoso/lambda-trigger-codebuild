@@ -1,8 +1,9 @@
 import json
 import traceback
 import boto3
-from dataclasses import dataclass
 import os
+import hmac
+import hashlib
 
 header_github_event = "X-GitHub-Event"
 
@@ -31,23 +32,31 @@ def request_proxy(data):
 
 def config_init():
 	projectName=os.getenv("codebuild_projectName")
-	sourceVersion=os.getenv("codebuild_version")
-	if not projectName and not sourceVersion:
+	github_secret=os.getenv("github_sha1_secret")
+	if not projectName and not github_secret:
 		return False
 	return True
 
 
 def handler(event, context):
+	''' 
+	Main handler — essentially, this function will get the raw JSON data from GitHub webhook and verify the signature using HMAC with SHA1.
+	'''
+	
 	response = {}
+	raw_body = event["body"].replace('\n', '')
 	try:
 		request = request_proxy(event)
-		print(request)
 		response["statusCode"]=200
 		response["headers"]={}
 		data = {}
 		if not config_init:
 			data["message"] = "Configuration check failed. Please check your configuration."
-			response["statusCode"] = 500
+			raise Exception("Configuration check failed")
+
+		if not ver(request["headers"]["X-Hub-Signature"], raw_body):
+			data["message"] = "Request failed verification."
+			raise Exception("Request failed verification.")
 		
 		if header_github_event in request["headers"]:
 			if request["headers"][header_github_event] == "ping":
@@ -65,14 +74,28 @@ def handler(event, context):
 	except Exception as e:
 		traceback.print_exc()
 		response["statusCode"]=500
-		response["body"]={}		
+		response["body"]=data
 	finally:	
 		return response_proxy(response)
 
 def trigger_build(source_version):
-    client = boto3.client('codebuild')
-    response = client.start_build(
+	client = boto3.client('codebuild')
+	response = client.start_build(
 		projectName=os.getenv("codebuild_projectName"),
 		sourceVersion=source_version
 	)
-    print(response)
+	print(response)
+	
+def ver(github_signature, payload):
+	'''
+	Verify the request with SHA1 and secret key defined.
+	'''
+	
+	try:
+		secret_key = os.getenv('github_sha1_secret')
+		sha_name, signature = github_signature.split('=')    
+		mac = hmac.new(secret_key.encode('utf-8'), msg=payload.encode('utf-8'), digestmod=hashlib.sha1)
+		return hmac.compare_digest(signature, mac.hexdigest())
+	except Exception as e:
+		traceback.print_exc()
+		return False
