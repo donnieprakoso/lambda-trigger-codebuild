@@ -29,6 +29,14 @@ def request_proxy(data):
 	except Exception as e:
 		traceback.print_exc()
 
+def config_init():
+	projectName=os.getenv("codebuild_projectName")
+	sourceVersion=os.getenv("codebuild_version")
+	if not projectName and not sourceVersion:
+		return False
+	return True
+
+
 def handler(event, context):
 	response = {}
 	try:
@@ -36,17 +44,21 @@ def handler(event, context):
 		print(request)
 		response["statusCode"]=200
 		response["headers"]={}
-		'''
-		Add your key/values to be returned here
-		'''		 
 		data = {}
+		if not config_init:
+			data["message"] = "Configuration check failed. Please check your configuration."
+			response["statusCode"] = 500
+		
 		if header_github_event in request["headers"]:
 			if request["headers"][header_github_event] == "ping":
 				data["message"]="pong"
 			elif request["headers"][header_github_event] == "push":
 				if request["body"]["ref"]=='refs/heads/dev':
-					trigger_build()
-					data["message"] = 'signal transmitted'
+					trigger_build("dev")
+					data["message"] = 'Building signalled : dev'
+				elif request["body"]["ref"]=='refs/heads/master':
+					trigger_build("master")
+					data["message"] = 'Building signalled : master'
 				else:
 					data["message"] = "skipped"
 		response["body"]=data
@@ -54,12 +66,13 @@ def handler(event, context):
 		traceback.print_exc()
 		response["statusCode"]=500
 		response["body"]={}		
-	return response_proxy(response)
+	finally:	
+		return response_proxy(response)
 
-def trigger_build():
+def trigger_build(source_version):
     client = boto3.client('codebuild')
     response = client.start_build(
 		projectName=os.getenv("codebuild_projectName"),
-		sourceVersion=os.getenv("codebuild_version"),
+		sourceVersion=source_version
 	)
     print(response)

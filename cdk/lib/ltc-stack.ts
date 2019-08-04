@@ -14,7 +14,6 @@ export class LtcStack extends cdk.Stack {
       
       environment: {
         codebuild_projectName:'',
-        codebuild_version:''
       },
       
     });
