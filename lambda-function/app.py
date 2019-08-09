@@ -5,7 +5,12 @@ import os
 import hmac
 import hashlib
 
-header_github_event = "X-GitHub-Event"
+HEADER_GITHUB_EVENT = "X-GitHub-Event"
+HEADER_GITHUB_SIGNATURE = "X-Hub-Signature"
+CODEBUILD_STAGES_BUILD=json.loads(os.getenv("CODEBUILD_STAGES_BUILD"))
+CODEBUILD_PROJECTNAME=os.getenv("CODEBUILD_PROJECTNAME")
+GITHUB_SHA1_SECRET=os.getenv("GITHUB_SHA1_SECRET")
+
 
 def response_proxy(data):
 	'''
@@ -31,9 +36,7 @@ def request_proxy(data):
 		traceback.print_exc()
 
 def config_init():
-	projectName=os.getenv("codebuild_projectName")
-	github_secret=os.getenv("github_sha1_secret")
-	if not projectName and not github_secret:
+	if not CODEBUILD_PROJECTNAME and not GITHUB_SHA1_SECRET and not CODEBUILD_STAGES_BUILD:
 		return False
 	return True
 
@@ -53,21 +56,19 @@ def handler(event, context):
 		if not config_init:
 			data["message"] = "Configuration check failed. Please check your configuration."
 			raise Exception("Configuration check failed")
-
-		if not ver(request["headers"]["X-Hub-Signature"], raw_body):
+		
+		if not ver(request["headers"][HEADER_GITHUB_SIGNATURE], raw_body):
 			data["message"] = "Request failed verification."
 			raise Exception("Request failed verification.")
 		
-		if header_github_event in request["headers"]:
-			if request["headers"][header_github_event] == "ping":
+		if HEADER_GITHUB_EVENT in request["headers"]:
+			if request["headers"][HEADER_GITHUB_EVENT] == "ping":
 				data["message"]="pong"
-			elif request["headers"][header_github_event] == "push":
-				if request["body"]["ref"]=='refs/heads/dev':
-					trigger_build("dev")
-					data["message"] = 'Building signalled : dev'
-				elif request["body"]["ref"]=='refs/heads/master':
-					trigger_build("master")
-					data["message"] = 'Building signalled : master'
+			elif request["headers"][HEADER_GITHUB_EVENT] == "push":
+				if request["body"]["ref"] in CODEBUILD_STAGES_BUILD:
+					build_branch = CODEBUILD_STAGES_BUILD[request["body"]["ref"]]["branch"]
+					build_spec = CODEBUILD_STAGES_BUILD[request["body"]["ref"]]["buildspec"]
+					trigger_build(CODEBUILD_PROJECTNAME, build_branch, build_spec)
 				else:
 					data["message"] = "skipped"
 		response["body"]=data
@@ -78,13 +79,16 @@ def handler(event, context):
 	finally:	
 		return response_proxy(response)
 
-def trigger_build(source_version):
-	client = boto3.client('codebuild')
-	response = client.start_build(
-		projectName=os.getenv("codebuild_projectName"),
-		sourceVersion=source_version
-	)
-	print(response)
+def trigger_build(project_name, source_version, buildspec):
+	try:
+		client = boto3.client('codebuild')
+		response = client.start_build(
+			projectName=project_name,
+			sourceVersion=source_version,
+			buildspecOverride=buildspec
+		)
+	except Exception as e:
+		raise Exception("Build signal failed.")
 	
 def ver(github_signature, payload):
 	'''
@@ -92,9 +96,8 @@ def ver(github_signature, payload):
 	'''
 	
 	try:
-		secret_key = os.getenv('github_sha1_secret')
-		sha_name, signature = github_signature.split('=')    
-		mac = hmac.new(secret_key.encode('utf-8'), msg=payload.encode('utf-8'), digestmod=hashlib.sha1)
+		sha_name, signature = github_signature.split('=')
+		mac = hmac.new(GITHUB_SHA1_SECRET.encode('utf-8'), msg=payload.encode('utf-8'), digestmod=hashlib.sha1)
 		return hmac.compare_digest(signature, mac.hexdigest())
 	except Exception as e:
 		traceback.print_exc()

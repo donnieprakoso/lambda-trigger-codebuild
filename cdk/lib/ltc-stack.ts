@@ -13,8 +13,9 @@ export class LtcStack extends cdk.Stack {
       code: lambda.Code.asset('../lambda-function'),
       
       environment: {
-        codebuild_projectName:'',
-        github_sha1_secret:''
+        CODEBUILD_PROJECTNAME:'donnieID_dev',
+        CODEBUILD_STAGES_BUILD:'{"refs/heads/dev":{"branch":"dev","buildspec":"_deployment/staging/buildspec-staging-release.yml"},"refs/heads/master":{"branch":"master","buildspec":"_deployment/production/buildspec-production-release.yaml"}}',
+        GITHUB_SHA1_SECRET:'fbe61f5368965f3e98419589477a2ff8'
       },
       
     });
